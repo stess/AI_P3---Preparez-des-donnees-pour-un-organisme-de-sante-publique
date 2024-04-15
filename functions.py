@@ -487,10 +487,14 @@ def kruskal_wallis_test(df, quantitative_columns, qualitative_column):
     for col in quantitative_columns:
         groups = [group.dropna().values for name, group in df.groupby(qualitative_column)[col]]
         H, p = kruskal(*groups)
-        eta_squared = np.var([np.mean(group) for group in groups]) / np.var(df[col].dropna())
-        results = results.append({'Variable': col, 'H-value': H, 'P-value': p, 'Eta-squared': eta_squared}, ignore_index=True)
+
+        n = sum(len(group) for group in df)  # Calculate total observations
+
+        k = len(df)  # Number of groups
+
+        eta_squared = (H - k + 1) / (n - k)
+        results = results.append({'Variable': col, 'H-value': round(H, 2), 'P-value': p, 'Eta-squared': round(eta_squared, 2)}, ignore_index=True)
     
-    # Affichage du tableau des résultats
     print(results)
 
     # Tri de la colonne qualitative par ordre croissant pour l'affichage
