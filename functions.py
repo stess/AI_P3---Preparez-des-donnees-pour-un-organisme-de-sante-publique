@@ -293,55 +293,64 @@ def plot_columns(df, columns, plot_type):
 # In[ ]:
 
 
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import GridSearchCV
+
 def impute_nutrition_grade_with_knn(df, numeric_columns):
     """
-    Impute les valeurs manquantes de 'nutrition_grade_fr' dans un DataFrame en utilisant KNN.
+    Impute les valeurs manquantes de 'nutrition_grade_fr' dans un DataFrame en utilisant KNN,
+    en conservant les valeurs originales des autres colonnes.
     
     Parameters:
     df (pandas.DataFrame): Le DataFrame à traiter.
     numeric_columns (list): Liste des colonnes numériques à utiliser pour l'imputation.
     
     Returns:
-    pandas.DataFrame: DataFrame avec les valeurs de 'nutrition_grade_fr' imputées.
+    pandas.DataFrame: DataFrame avec les valeurs de 'nutrition_grade_fr' imputées, 
+                      autres données non modifiées.
     """
+    # Création d'une copie pour éviter la modification du DataFrame original
     df_copy = df.copy()
     
-    # Prétraitement : Normalisation des données numériques
+    # Prétraitement : Normalisation des données numériques pour l'imputation
     scaler = StandardScaler()
-    df_copy[numeric_columns] = scaler.fit_transform(df_copy[numeric_columns])
+    df_scaled = scaler.fit_transform(df_copy[numeric_columns][df_copy['nutrition_grade_fr'].notna()])
     
     # Séparation des données
     known_grade = df_copy[df_copy['nutrition_grade_fr'].notna()]
     unknown_grade = df_copy[df_copy['nutrition_grade_fr'].isna()]
+    known_grade_scaled = known_grade.copy()
+    known_grade_scaled[numeric_columns] = df_scaled
     
     # Encodeur pour les variables catégorielles
     le = LabelEncoder()
-    X_known = known_grade[numeric_columns]
     y_known = le.fit_transform(known_grade['nutrition_grade_fr'])
     
     # Configuration de GridSearchCV pour trouver le meilleur 'n_neighbors'
     param_grid = {'n_neighbors': np.arange(1, 10)}
     knn = KNeighborsClassifier()
     grid_search = GridSearchCV(knn, param_grid, cv=5, scoring='accuracy')
-    grid_search.fit(X_known, y_known)
+    grid_search.fit(known_grade_scaled[numeric_columns], y_known)
     
     # Meilleur 'n_neighbors' et score
     best_k = grid_search.best_params_['n_neighbors']
     best_score = grid_search.best_score_
-    print(f"Le nombre optimal de voisins est : {best_k}")
-    print(f"Meilleure score d'exactitude avec k={best_k} : {best_score}")
+    print(f"Le nombre optimal de voisins est : {best_k}, avec une exactitude de : {best_score}")
     
     # Entraînement et prédiction avec le meilleur 'k'
     knn = KNeighborsClassifier(n_neighbors=best_k)
-    knn.fit(X_known, y_known)
-    X_unknown = unknown_grade[numeric_columns]
-    predicted_grade = knn.predict(X_unknown)
+    knn.fit(known_grade_scaled[numeric_columns], y_known)
+    df_scaled_unknown = scaler.transform(unknown_grade[numeric_columns])
+    predicted_grade = knn.predict(df_scaled_unknown)
     predicted_grade_labels = le.inverse_transform(predicted_grade)
     
     # Remplissage des valeurs manquantes dans le DataFrame original
-    df_copy.loc[df_copy['nutrition_grade_fr'].isna(), 'nutrition_grade_fr'] = predicted_grade_labels
+    df.loc[df['nutrition_grade_fr'].isna(), 'nutrition_grade_fr'] = predicted_grade_labels
     
-    return df_copy
+    return df
 
 
 # In[ ]:
@@ -362,12 +371,8 @@ def impute_with_mean_by_group(df, target_col, group_col):
     # Calcul des moyennes par groupe pour la colonne cible
     mean_by_group = df.groupby(group_col)[target_col].mean()
 
-    # Assure que les groupes de group_col qui sont NaN ne sont pas utilisés pour l'imputation
-    valid_groups = df[group_col].notna()
-
-    # Imputation des valeurs manquantes dans la colonne cible pour les groupes valides
-    for group, mean in mean_by_group.iteritems():
-        df.loc[(df[group_col] == group) & (df[target_col].isna()), target_col] = mean
+    # Imputation des valeurs manquantes dans la colonne cible
+    df[target_col].fillna(df[group_col].map(mean_by_group), inplace=True)
     
     return df
 
@@ -488,12 +493,15 @@ def kruskal_wallis_test(df, quantitative_columns, qualitative_column):
         groups = [group.dropna().values for name, group in df.groupby(qualitative_column)[col]]
         H, p = kruskal(*groups)
 
-        n = sum(len(group) for group in df)  # Calculate total observations
+        # Calcul du nombre total d'observations
+        n = sum(len(group) for group in df) 
 
-        k = len(df)  # Number of groups
+        # Nombre de groupes
+        k = len(df) 
 
         eta_squared = (H - k + 1) / (n - k)
-        results = results.append({'Variable': col, 'H-value': round(H, 2), 'P-value': p, 'Eta-squared': round(eta_squared, 2)}, ignore_index=True)
+        new_row = pd.DataFrame({'Variable': [col], 'H-value': [round(H, 2)], 'P-value': [p], 'Eta-squared': [round(eta_squared, 2)]})
+        results = pd.concat([results, new_row], ignore_index=True)
     
     print(results)
 
